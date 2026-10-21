@@ -1,0 +1,25 @@
+#!/bin/bash
+# Least-privilege roles. Runs once on first init of the primary.
+set -e
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
+CREATE ROLE replicator WITH LOGIN REPLICATION PASSWORD '${REPLICATOR_PASSWORD}';
+CREATE ROLE monitor    WITH LOGIN PASSWORD '${MONITOR_PASSWORD}';
+GRANT pg_monitor TO monitor;
+CREATE ROLE app_rw     WITH LOGIN PASSWORD '${APP_RW_PASSWORD}';
+CREATE ROLE app_ro     WITH LOGIN PASSWORD '${APP_RO_PASSWORD}';
+
+REVOKE ALL ON DATABASE ${POSTGRES_DB} FROM PUBLIC;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO app_rw, app_ro, monitor;
+
+CREATE SCHEMA shop;
+GRANT USAGE ON SCHEMA shop TO app_rw, app_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA shop GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rw;
+ALTER DEFAULT PRIVILEGES IN SCHEMA shop GRANT USAGE, SELECT ON SEQUENCES TO app_rw;
+ALTER DEFAULT PRIVILEGES IN SCHEMA shop GRANT SELECT ON TABLES TO app_ro;
+
+ALTER ROLE app_ro SET default_transaction_read_only = on;
+ALTER ROLE app_ro SET statement_timeout = '30s';
+ALTER ROLE app_rw SET statement_timeout = '60s';
+ALTER ROLE app_rw SET idle_in_transaction_session_timeout = '60s';
+SQL
